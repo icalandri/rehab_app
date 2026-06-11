@@ -21,10 +21,23 @@ st.set_page_config(page_title="Admisión a Rehabilitación",
                    page_icon="🏥", layout="wide")
 
 # --------------------------- BRANDING AZIKNA ---------------------------
-_LOGO = os.path.join(os.path.dirname(__file__), "assets", "azikna_logo.png")
-if os.path.exists(_LOGO):
+import glob
+
+
+def _find_logo():
+    """Devuelve la primera imagen encontrada en assets/ (cualquier nombre)."""
+    d = os.path.join(os.path.dirname(__file__), "assets")
+    for pat in ("*.png", "*.PNG", "*.jpg", "*.jpeg", "*.JPG", "*.JPEG"):
+        hits = sorted(glob.glob(os.path.join(d, pat)))
+        if hits:
+            return hits[0]
+    return None
+
+
+_LOGO = _find_logo()
+if _LOGO:
     try:
-        st.logo(_LOGO)
+        st.logo(_LOGO, size="large")
     except Exception:
         pass
 
@@ -40,6 +53,13 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+# Encabezado visible con el logo (además del de la barra lateral)
+if _LOGO:
+    try:
+        st.image(_LOGO, width=180)
+    except Exception:
+        pass
 
 # --------------------------- LOGIN ---------------------------
 usuario = auth.login_gate()
