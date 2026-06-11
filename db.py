@@ -1,6 +1,10 @@
 """
 Capa de acceso a datos (Postgres / Supabase).
 Lee la configuración desde st.secrets["postgres"].
+
+Todas las tablas se nombran calificadas con el esquema 'rehab.' para no
+depender del search_path (el pooler de Supabase puede no aplicarlo en
+todas las conexiones).
 """
 from __future__ import annotations
 
@@ -22,9 +26,7 @@ def get_engine() -> Engine:
     )
     engine = create_engine(url, pool_pre_ping=True)
 
-    # Fijar el esquema en CADA conexión nueva. El pooler de Supabase
-    # ignora el parámetro 'options' del startup, así que lo hacemos con
-    # un SET explícito post-conexión (que el pooler sí respeta).
+    # Cinturón y tiradores: además fijamos search_path en cada conexión.
     @event.listens_for(engine, "connect")
     def _set_search_path(dbapi_conn, conn_record):
         cur = dbapi_conn.cursor()
@@ -41,7 +43,7 @@ def get_engine() -> Engine:
 def get_antecedentes_catalogo() -> list[dict]:
     q = text(
         "SELECT id, categoria, item, alta_prioridad, orden "
-        "FROM cat_antecedentes ORDER BY orden"
+        "FROM rehab.cat_antecedentes ORDER BY orden"
     )
     with get_engine().connect() as c:
         return [dict(r._mapping) for r in c.execute(q)]
@@ -49,7 +51,7 @@ def get_antecedentes_catalogo() -> list[dict]:
 
 @st.cache_data(ttl=600)
 def get_factores_catalogo() -> list[dict]:
-    q = text("SELECT id, factor, orden FROM cat_factores_riesgo ORDER BY orden")
+    q = text("SELECT id, factor, orden FROM rehab.cat_factores_riesgo ORDER BY orden")
     with get_engine().connect() as c:
         return [dict(r._mapping) for r in c.execute(q)]
 
@@ -60,7 +62,7 @@ def get_factores_catalogo() -> list[dict]:
 def get_usuario(usuario: str) -> dict | None:
     q = text(
         "SELECT id, usuario, nombre, password_hash, rol, activo "
-        "FROM usuarios WHERE usuario = :u AND activo = true"
+        "FROM rehab.usuarios WHERE usuario = :u AND activo = true"
     )
     with get_engine().connect() as c:
         row = c.execute(q, {"u": usuario}).fetchone()
@@ -70,7 +72,7 @@ def get_usuario(usuario: str) -> dict | None:
 def listar_usuarios() -> list[dict]:
     q = text(
         "SELECT id, usuario, nombre, rol, activo, creado_en "
-        "FROM usuarios ORDER BY creado_en"
+        "FROM rehab.usuarios ORDER BY creado_en"
     )
     with get_engine().connect() as c:
         return [dict(r._mapping) for r in c.execute(q)]
@@ -81,7 +83,7 @@ def crear_usuario(usuario: str, nombre: str, password_hash: str,
     """Alta/actualización de usuario (la clave llega ya hasheada)."""
     q = text(
         """
-        INSERT INTO usuarios (usuario, nombre, password_hash, rol)
+        INSERT INTO rehab.usuarios (usuario, nombre, password_hash, rol)
         VALUES (:u, :n, :h, :r)
         ON CONFLICT (usuario) DO UPDATE
             SET nombre = EXCLUDED.nombre,
@@ -97,7 +99,7 @@ def crear_usuario(usuario: str, nombre: str, password_hash: str,
 
 def set_usuario_activo(usuario_id: int, activo: bool) -> None:
     with get_engine().begin() as c:
-        c.execute(text("UPDATE usuarios SET activo = :a WHERE id = :i"),
+        c.execute(text("UPDATE rehab.usuarios SET activo = :a WHERE id = :i"),
                   {"a": activo, "i": usuario_id})
 
 
@@ -105,7 +107,7 @@ def set_usuario_activo(usuario_id: int, activo: bool) -> None:
 # Pacientes
 # ---------------------------------------------------------------------
 def buscar_paciente_por_dni(dni: str) -> dict | None:
-    q = text("SELECT id, dni, apellido_nombre FROM pacientes WHERE dni = :d")
+    q = text("SELECT id, dni, apellido_nombre FROM rehab.pacientes WHERE dni = :d")
     with get_engine().connect() as c:
         row = c.execute(q, {"d": dni.strip()}).fetchone()
     return dict(row._mapping) if row else None
@@ -116,12 +118,12 @@ def upsert_paciente(conn, dni: str, apellido_nombre: str,
     """Devuelve el id del paciente, creándolo si no existe (por DNI)."""
     q = text(
         """
-        INSERT INTO pacientes (dni, apellido_nombre, fecha_nacimiento)
+        INSERT INTO rehab.pacientes (dni, apellido_nombre, fecha_nacimiento)
         VALUES (:dni, :nom, :fnac)
         ON CONFLICT (dni) DO UPDATE
             SET apellido_nombre = EXCLUDED.apellido_nombre,
                 fecha_nacimiento = COALESCE(EXCLUDED.fecha_nacimiento,
-                                            pacientes.fecha_nacimiento)
+                                            rehab.pacientes.fecha_nacimiento)
         RETURNING id
         """
     )
@@ -154,7 +156,7 @@ def guardar_admision(paciente: dict, admision: dict,
         placeholders = ", ".join(f":{c}" for c in cols)
         col_list = ", ".join(cols)
         q_adm = text(
-            f"INSERT INTO admisiones (paciente_id, creado_por, {col_list}) "
+            f"INSERT INTO rehab.admisiones (paciente_id, creado_por, {col_list}) "
             f"VALUES (:paciente_id, :creado_por, {placeholders}) RETURNING id"
         )
         params = dict(admision)
@@ -164,7 +166,7 @@ def guardar_admision(paciente: dict, admision: dict,
 
         for a in antecedentes:
             conn.execute(text(
-                "INSERT INTO adm_antecedentes "
+                "INSERT INTO rehab.adm_antecedentes "
                 "(admision_id, cat_antecedente_id, categoria, item, presente, detalle, observaciones) "
                 "VALUES (:aid, :cid, :cat, :item, :pres, :det, :obs)"
             ), {"aid": admision_id, "cid": a.get("cat_antecedente_id"),
@@ -174,20 +176,20 @@ def guardar_admision(paciente: dict, admision: dict,
 
         for i, c_ in enumerate(cirugias, start=1):
             conn.execute(text(
-                "INSERT INTO adm_cirugias (admision_id, orden, tipo_cirugia, fecha_aprox) "
+                "INSERT INTO rehab.adm_cirugias (admision_id, orden, tipo_cirugia, fecha_aprox) "
                 "VALUES (:aid, :ord, :tipo, :fec)"
             ), {"aid": admision_id, "ord": i,
                 "tipo": c_.get("tipo_cirugia"), "fec": c_.get("fecha_aprox")})
 
         for al in alergias:
             conn.execute(text(
-                "INSERT INTO adm_alergias (admision_id, tipo, descripcion) "
+                "INSERT INTO rehab.adm_alergias (admision_id, tipo, descripcion) "
                 "VALUES (:aid, :tipo, :desc)"
             ), {"aid": admision_id, "tipo": al["tipo"], "desc": al.get("descripcion")})
 
         for i, m in enumerate(medicacion, start=1):
             conn.execute(text(
-                "INSERT INTO adm_medicacion "
+                "INSERT INTO rehab.adm_medicacion "
                 "(admision_id, orden, medicamento, dosis, frecuencia, via, prescriptor, indicacion) "
                 "VALUES (:aid, :ord, :med, :dos, :frec, :via, :pres, :ind)"
             ), {"aid": admision_id, "ord": i, "med": m.get("medicamento"),
@@ -197,7 +199,7 @@ def guardar_admision(paciente: dict, admision: dict,
 
         for p in problemas:
             conn.execute(text(
-                "INSERT INTO adm_problemas_activos "
+                "INSERT INTO rehab.adm_problemas_activos "
                 "(admision_id, problema, descripcion, estado, medico_responsable) "
                 "VALUES (:aid, :prob, :desc, :est, :med)"
             ), {"aid": admision_id, "prob": p.get("problema"),
@@ -206,7 +208,7 @@ def guardar_admision(paciente: dict, admision: dict,
 
         for f in factores:
             conn.execute(text(
-                "INSERT INTO adm_factores_riesgo "
+                "INSERT INTO rehab.adm_factores_riesgo "
                 "(admision_id, cat_factor_id, factor, presente, detalle) "
                 "VALUES (:aid, :cid, :fac, :pres, :det)"
             ), {"aid": admision_id, "cid": f.get("cat_factor_id"),
@@ -218,4 +220,4 @@ def guardar_admision(paciente: dict, admision: dict,
 
 def contar_admisiones() -> int:
     with get_engine().connect() as c:
-        return c.execute(text("SELECT count(*) FROM admisiones")).scalar_one()
+        return c.execute(text("SELECT count(*) FROM rehab.admisiones")).scalar_one()
