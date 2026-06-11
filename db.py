@@ -5,7 +5,7 @@ Lee la configuración desde st.secrets["postgres"].
 from __future__ import annotations
 
 import streamlit as st
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
 
 
@@ -20,11 +20,18 @@ def get_engine() -> Engine:
         f"@{cfg['host']}:{cfg['port']}/{cfg['dbname']}"
         f"?sslmode={cfg.get('sslmode', 'require')}"
     )
-    return create_engine(
-        url,
-        pool_pre_ping=True,
-        connect_args={"options": "-csearch_path=rehab,public"},
-    )
+    engine = create_engine(url, pool_pre_ping=True)
+
+    # Fijar el esquema en CADA conexión nueva. El pooler de Supabase
+    # ignora el parámetro 'options' del startup, así que lo hacemos con
+    # un SET explícito post-conexión (que el pooler sí respeta).
+    @event.listens_for(engine, "connect")
+    def _set_search_path(dbapi_conn, conn_record):
+        cur = dbapi_conn.cursor()
+        cur.execute("SET search_path TO rehab, public")
+        cur.close()
+
+    return engine
 
 
 # ---------------------------------------------------------------------
