@@ -218,6 +218,78 @@ def guardar_admision(paciente: dict, admision: dict,
     return admision_id
 
 
+# ---------------------------------------------------------------------
+# Búsqueda y recuperación de informes ya cargados
+# ---------------------------------------------------------------------
+def buscar_pacientes(query: str) -> list[dict]:
+    """Busca pacientes por DNI (exacto/parcial) o nombre (parcial)."""
+    q = text(
+        """
+        SELECT p.id, p.dni, p.apellido_nombre,
+               count(a.id)        AS n_admisiones,
+               max(a.fecha_entrevista) AS ultima_fecha
+        FROM rehab.pacientes p
+        LEFT JOIN rehab.admisiones a ON a.paciente_id = p.id
+        WHERE p.dni ILIKE :term OR p.apellido_nombre ILIKE :term
+        GROUP BY p.id, p.dni, p.apellido_nombre
+        ORDER BY p.apellido_nombre
+        LIMIT 50
+        """
+    )
+    with get_engine().connect() as c:
+        return [dict(r._mapping) for r in c.execute(q, {"term": f"%{query.strip()}%"})]
+
+
+def listar_admisiones_de(paciente_id: int) -> list[dict]:
+    q = text(
+        """
+        SELECT a.id, a.fecha_entrevista, a.profesional, a.creado_en,
+               u.nombre AS cargado_por
+        FROM rehab.admisiones a
+        LEFT JOIN rehab.usuarios u ON u.id = a.creado_por
+        WHERE a.paciente_id = :pid
+        ORDER BY a.fecha_entrevista DESC NULLS LAST, a.creado_en DESC
+        """
+    )
+    with get_engine().connect() as c:
+        return [dict(r._mapping) for r in c.execute(q, {"pid": paciente_id})]
+
+
+def get_admision_completa(admision_id: int) -> dict | None:
+    """Devuelve paciente + admisión (sin None) + tablas hijas, listo para PDF."""
+    eng = get_engine()
+    with eng.connect() as c:
+        adm_row = c.execute(text("SELECT * FROM rehab.admisiones WHERE id = :i"),
+                            {"i": admision_id}).fetchone()
+        if adm_row is None:
+            return None
+        adm = dict(adm_row._mapping)
+        pac_row = c.execute(
+            text("SELECT dni, apellido_nombre, fecha_nacimiento "
+                 "FROM rehab.pacientes WHERE id = :p"),
+            {"p": adm["paciente_id"]}).fetchone()
+        paciente = dict(pac_row._mapping) if pac_row else {}
+
+        def hijas(tabla):
+            rows = c.execute(text(f"SELECT * FROM rehab.{tabla} WHERE admision_id = :i ORDER BY id"),
+                             {"i": admision_id})
+            return [dict(r._mapping) for r in rows]
+
+        antecedentes = hijas("adm_antecedentes")
+        cirugias = hijas("adm_cirugias")
+        alergias = hijas("adm_alergias")
+        medicacion = hijas("adm_medicacion")
+        problemas = hijas("adm_problemas_activos")
+        factores = hijas("adm_factores_riesgo")
+
+    # quitar None del dict de admisión (para que el PDF no imprima vacíos)
+    adm_clean = {k: v for k, v in adm.items() if v is not None and v != []}
+    return {"paciente": paciente, "admision": adm_clean,
+            "antecedentes": antecedentes, "cirugias": cirugias,
+            "alergias": alergias, "medicacion": medicacion,
+            "problemas": problemas, "factores": factores}
+
+
 def contar_admisiones() -> int:
     with get_engine().connect() as c:
         return c.execute(text("SELECT count(*) FROM rehab.admisiones")).scalar_one()

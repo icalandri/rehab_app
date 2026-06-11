@@ -1,6 +1,6 @@
 """
-Formulario web â€” EvaluaciÃ³n Integral de AdmisiÃ³n a RehabilitaciÃ³n
-Streamlit + Postgres (Supabase). Carga 1 admisiÃ³n por envÃ­o.
+Formulario web — Evaluación Integral de Admisión a Rehabilitación
+Streamlit + Postgres (Supabase). Carga 1 admisión por envío.
 
 Ejecutar local:   streamlit run app.py
 """
@@ -17,8 +17,8 @@ import auth
 import db
 import pdf_export
 
-st.set_page_config(page_title="AdmisiÃ³n a RehabilitaciÃ³n",
-                   page_icon="ðŸ¥", layout="wide")
+st.set_page_config(page_title="Admisión a Rehabilitación",
+                   page_icon="🏥", layout="wide")
 
 # --------------------------- BRANDING AZIKNA ---------------------------
 _LOGO = os.path.join(os.path.dirname(__file__), "assets", "azikna_logo.png")
@@ -45,24 +45,24 @@ st.markdown(
 usuario = auth.login_gate()
 auth.logout_button()
 
-# --------------------------- NAVEGACIÃ“N ---------------------------
+# --------------------------- NAVEGACIÓN ---------------------------
 es_admin = usuario.get("rol") == "admin"
-vistas = ["ðŸ“ Cargar evaluaciÃ³n"]
+vistas = ["📝 Cargar evaluación", "🔎 Buscar paciente"]
 if es_admin:
-    vistas.append("ðŸ‘¥ GestiÃ³n de usuarios")
+    vistas.append("👥 Gestión de usuarios")
 vista = st.sidebar.radio("Vista", vistas) if len(vistas) > 1 else vistas[0]
 
 
 def panel_usuarios():
-    st.title("ðŸ‘¥ GestiÃ³n de usuarios")
-    st.caption("Solo administradores. Las contraseÃ±as se guardan hasheadas (bcrypt).")
+    st.title("👥 Gestión de usuarios")
+    st.caption("Solo administradores. Las contraseñas se guardan hasheadas (bcrypt).")
 
     st.subheader("Usuarios existentes")
     usuarios = db.listar_usuarios()
     if usuarios:
         st.dataframe(
             [{"Usuario": u["usuario"], "Nombre": u["nombre"], "Rol": u["rol"],
-              "Activo": "SÃ­" if u["activo"] else "No"} for u in usuarios],
+              "Activo": "Sí" if u["activo"] else "No"} for u in usuarios],
             hide_index=True, use_container_width=True,
         )
 
@@ -74,21 +74,21 @@ def panel_usuarios():
             nnom = st.text_input("Nombre completo")
         with c2:
             nrol = st.selectbox("Rol", ["cargador", "lector", "admin"],
-                                help="cargador: carga datos Â· lector: solo lectura Â· admin: ademÃ¡s gestiona usuarios")
-            np1 = st.text_input("ContraseÃ±a", type="password")
-            np2 = st.text_input("Repetir contraseÃ±a", type="password")
+                                help="cargador: carga datos · lector: solo lectura · admin: además gestiona usuarios")
+            np1 = st.text_input("Contraseña", type="password")
+            np2 = st.text_input("Repetir contraseña", type="password")
         crear = st.form_submit_button("Crear / actualizar usuario", type="primary")
 
     if crear:
         if not nu.strip() or not nnom.strip():
             st.error("Usuario y nombre son obligatorios.")
         elif np1 != np2:
-            st.error("Las contraseÃ±as no coinciden.")
+            st.error("Las contraseñas no coinciden.")
         elif len(np1) < 8:
-            st.error("La contraseÃ±a debe tener al menos 8 caracteres.")
+            st.error("La contraseña debe tener al menos 8 caracteres.")
         else:
             db.crear_usuario(nu, nnom, auth.hash_password(np1), nrol)
-            st.success(f"âœ… Usuario '{nu}' creado/actualizado con rol '{nrol}'.")
+            st.success(f"✅ Usuario '{nu}' creado/actualizado con rol '{nrol}'.")
             st.rerun()
 
     st.subheader("Activar / desactivar")
@@ -97,7 +97,7 @@ def panel_usuarios():
         if u["usuario"] == usuario["usuario"]:
             continue  # no permitir auto-desactivarse
         col1, col2 = st.columns([3, 1])
-        col1.write(f"**{u['usuario']}** â€” {u['nombre']} ({u['rol']})")
+        col1.write(f"**{u['usuario']}** — {u['nombre']} ({u['rol']})")
         if u["activo"]:
             if col2.button("Desactivar", key=f"off_{u['id']}"):
                 db.set_usuario_activo(u["id"], False); st.rerun()
@@ -106,14 +106,98 @@ def panel_usuarios():
                 db.set_usuario_activo(u["id"], True); st.rerun()
 
 
-if vista == "ðŸ‘¥ GestiÃ³n de usuarios":
+def panel_buscar():
+    st.title("🔎 Buscar paciente")
+    st.caption("Recuperá una evaluación ya cargada, por DNI o nombre.")
+
+    query = st.text_input("DNI o nombre del paciente")
+    if not query.strip():
+        st.info("Ingresá un DNI o un nombre para buscar.")
+        return
+
+    pacientes = db.buscar_pacientes(query)
+    if not pacientes:
+        st.warning("Sin resultados para esa búsqueda.")
+        return
+
+    opciones = {
+        f"{p['apellido_nombre']}  ·  DNI {p['dni']}  ·  {p['n_admisiones']} eval.": p
+        for p in pacientes
+    }
+    elegido = st.selectbox("Paciente", list(opciones.keys()))
+    p = opciones[elegido]
+
+    admisiones = db.listar_admisiones_de(p["id"])
+    if not admisiones:
+        st.info("Este paciente no tiene evaluaciones cargadas.")
+        return
+
+    opa = {}
+    for a in admisiones:
+        fecha = a["fecha_entrevista"] or "(sin fecha)"
+        prof = a.get("profesional") or "s/profesional"
+        opa[f"{fecha}  ·  {prof}  ·  #{a['id']}"] = a["id"]
+    sel_label = st.selectbox("Evaluación", list(opa.keys()))
+    aid = opa[sel_label]
+
+    data = db.get_admision_completa(aid)
+    if not data:
+        st.error("No se pudo recuperar la evaluación.")
+        return
+
+    adm = data["admision"]
+    pac = data["paciente"]
+    st.divider()
+    st.subheader(f"{pac.get('apellido_nombre','')}  ·  DNI {pac.get('dni','')}")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Edad", adm.get("edad", "—"))
+    c2.metric("Fecha entrevista", str(adm.get("fecha_entrevista", "—")))
+    c3.metric("MMSE", adm.get("mmse_puntaje", "—"))
+    if adm.get("motivo_descripcion"):
+        st.write("**Motivo principal:** " + str(adm["motivo_descripcion"]))
+
+    with st.expander("Ver detalle (antecedentes, medicación, factores)"):
+        if data["antecedentes"]:
+            st.write("**Antecedentes**")
+            st.dataframe([{"Categoría": a.get("categoria"), "Ítem": a.get("item"),
+                           "Detalle": a.get("detalle")} for a in data["antecedentes"]],
+                         hide_index=True, use_container_width=True)
+        if data["medicacion"]:
+            st.write("**Medicación**")
+            st.dataframe([{"Medicamento": m.get("medicamento"), "Dosis": m.get("dosis"),
+                           "Frecuencia": m.get("frecuencia")} for m in data["medicacion"]],
+                         hide_index=True, use_container_width=True)
+        factores_pres = [f for f in data["factores"] if f.get("presente")]
+        if factores_pres:
+            st.write("**Factores de riesgo**")
+            st.dataframe([{"Factor": f.get("factor"), "Detalle": f.get("detalle")}
+                          for f in factores_pres],
+                         hide_index=True, use_container_width=True)
+
+    try:
+        pdf_bytes = pdf_export.generar_pdf(
+            pac, adm, data["antecedentes"], data["cirugias"], data["alergias"],
+            data["medicacion"], data["problemas"], data["factores"])
+        st.download_button(
+            "📄 Descargar PDF de esta evaluación", data=pdf_bytes,
+            file_name=f"admision_{pac.get('dni','')}_{aid}.pdf",
+            mime="application/pdf", type="primary")
+    except Exception as e:
+        st.warning(f"No se pudo generar el PDF: {e}")
+
+
+if vista == "🔎 Buscar paciente":
+    panel_buscar()
+    st.stop()
+
+if vista == "👥 Gestión de usuarios":
     panel_usuarios()
     st.stop()
 
-st.title("ðŸ¥ EvaluaciÃ³n Integral de AdmisiÃ³n a RehabilitaciÃ³n")
-st.caption("Una fila por evaluaciÃ³n. El paciente se identifica por DNI (se crea o reutiliza).")
+st.title("🏥 Evaluación Integral de Admisión a Rehabilitación")
+st.caption("Una fila por evaluación. El paciente se identifica por DNI (se crea o reutiliza).")
 
-# CatÃ¡logos (desde la base)
+# Catálogos (desde la base)
 CAT_ANT = db.get_antecedentes_catalogo()
 CAT_FAC = db.get_factores_catalogo()
 
@@ -123,21 +207,21 @@ def sel(label, opciones, key, help=None):
 
 
 def tri(label, key):
-    """Booleano de 3 estados: SÃ­ / No / (sin dato)."""
-    v = st.radio(label, ["â€”", "SÃ­", "No"], horizontal=True, key=key)
-    return {"â€”": None, "SÃ­": True, "No": False}[v]
+    """Booleano de 3 estados: Sí / No / (sin dato)."""
+    v = st.radio(label, ["—", "Sí", "No"], horizontal=True, key=key)
+    return {"—": None, "Sí": True, "No": False}[v]
 
 
 tabs = st.tabs([
-    "0 Â· Entrevista", "1 Â· DemogrÃ¡ficos", "2 Â· Antecedentes",
-    "3 Â· MedicaciÃ³n", "4 Â· Problemas activos", "5 Â· Funcional",
-    "6 Â· Factores de riesgo", "7 Â· Cierre",
+    "0 · Entrevista", "1 · Demográficos", "2 · Antecedentes",
+    "3 · Medicación", "4 · Problemas activos", "5 · Funcional",
+    "6 · Factores de riesgo", "7 · Cierre",
 ])
 
 adm: dict = {}
 pac: dict = {}
 
-# ===================== MÃ“DULO 0 â€” ENTREVISTA =====================
+# ===================== MÓDULO 0 — ENTREVISTA =====================
 with tabs[0]:
     c1, c2 = st.columns(2)
     with c1:
@@ -149,9 +233,9 @@ with tabs[0]:
         adm["informante"] = sel("Informante",
                                 ["paciente_solo", "con_acompanante", "solo_acompanante"],
                                 "informante")
-        adm["relacion_acompanante"] = st.text_input("RelaciÃ³n del acompaÃ±ante") or None
+        adm["relacion_acompanante"] = st.text_input("Relación del acompañante") or None
 
-# ===================== MÃ“DULO 1 â€” DEMOGRÃFICOS =====================
+# ===================== MÓDULO 1 — DEMOGRÁFICOS =====================
 with tabs[1]:
     st.subheader("1.1 Datos personales")
     c1, c2, c3 = st.columns(3)
@@ -172,11 +256,11 @@ with tabs[1]:
     st.subheader("1.2 Red de soporte")
     c1, c2, c3 = st.columns(3)
     with c1:
-        adm["vive_solo"] = tri("Â¿Vive solo/a?", "vive_solo")
-        adm["cuidador_formal"] = tri("Â¿Servicio de cuidador formal domiciliario?", "cuid_formal")
+        adm["vive_solo"] = tri("¿Vive solo/a?", "vive_solo")
+        adm["cuidador_formal"] = tri("¿Servicio de cuidador formal domiciliario?", "cuid_formal")
     with c2:
         adm["cuidador_nombre"] = st.text_input("Cuidador principal (nombre)") or None
-        adm["cuidador_vinculo"] = st.text_input("VÃ­nculo del cuidador") or None
+        adm["cuidador_vinculo"] = st.text_input("Vínculo del cuidador") or None
     with c3:
         adm["cuidador_disponibilidad"] = sel("Disponibilidad del cuidador",
                                              ["permanente", "parcial", "ninguna"],
@@ -185,19 +269,19 @@ with tabs[1]:
     st.subheader("1.3 Nivel educativo y actividad previa")
     c1, c2, c3 = st.columns(3)
     with c1:
-        adm["anios_escolaridad"] = st.number_input("AÃ±os de escolaridad formal",
+        adm["anios_escolaridad"] = st.number_input("Años de escolaridad formal",
                                                    0, 30, value=None, step=1)
     with c2:
         adm["actividad_laboral_previa"] = st.text_input("Actividad laboral previa") or None
     with c3:
-        adm["actividad_fisica"] = sel("Actividad fÃ­sica habitual",
+        adm["actividad_fisica"] = sel("Actividad física habitual",
                                      ["sedentario", "leve", "moderada", "intensa"],
                                      "act_fis")
 
-# ===================== MÃ“DULO 2 â€” ANTECEDENTES =====================
+# ===================== MÓDULO 2 — ANTECEDENTES =====================
 with tabs[2]:
-    st.subheader("2.1â€“2.9 Antecedentes mÃ©dicos")
-    st.caption("TildÃ¡ los presentes y completÃ¡ el detalle (fecha, tipo, territorio, etc.).")
+    st.subheader("2.1–2.9 Antecedentes médicos")
+    st.caption("Tildá los presentes y completá el detalle (fecha, tipo, territorio, etc.).")
     df_ant = pd.DataFrame([
         {"id": r["id"], "categoria": r["categoria"], "item": r["item"],
          "presente": False, "detalle": "", "observaciones": ""}
@@ -207,7 +291,7 @@ with tabs[2]:
         df_ant, hide_index=True, use_container_width=True, key="ant",
         column_config={
             "id": None,
-            "categoria": st.column_config.TextColumn("CategorÃ­a", disabled=True),
+            "categoria": st.column_config.TextColumn("Categoría", disabled=True),
             "item": st.column_config.TextColumn("Antecedente", disabled=True, width="large"),
             "presente": st.column_config.CheckboxColumn("Presente"),
             "detalle": st.column_config.TextColumn("Detalle"),
@@ -215,12 +299,12 @@ with tabs[2]:
         },
     )
 
-    st.subheader("2.10 CirugÃ­as relevantes")
+    st.subheader("2.10 Cirugías relevantes")
     cir_edit = st.data_editor(
         pd.DataFrame(columns=["tipo_cirugia", "fecha_aprox"]),
         num_rows="dynamic", hide_index=True, use_container_width=True, key="cir",
         column_config={
-            "tipo_cirugia": st.column_config.TextColumn("Tipo de cirugÃ­a", width="large"),
+            "tipo_cirugia": st.column_config.TextColumn("Tipo de cirugía", width="large"),
             "fecha_aprox": st.column_config.TextColumn("Fecha aproximada"),
         },
     )
@@ -232,53 +316,53 @@ with tabs[2]:
         hide_index=True, use_container_width=True, key="alg",
         column_config={
             "tipo": st.column_config.TextColumn("Tipo", disabled=True),
-            "descripcion": st.column_config.TextColumn("DescripciÃ³n (agente + reacciÃ³n)", width="large"),
+            "descripcion": st.column_config.TextColumn("Descripción (agente + reacción)", width="large"),
         },
     )
 
-# ===================== MÃ“DULO 3 â€” MEDICACIÃ“N =====================
+# ===================== MÓDULO 3 — MEDICACIÓN =====================
 with tabs[3]:
-    st.subheader("3 Â· MedicaciÃ³n habitual")
-    st.caption("IncluÃ­ automedicaciÃ³n y suplementos. AgregÃ¡ filas con el botÃ³n âž•.")
+    st.subheader("3 · Medicación habitual")
+    st.caption("Incluí automedicación y suplementos. Agregá filas con el botón ➕.")
     med_edit = st.data_editor(
         pd.DataFrame(columns=["medicamento", "dosis", "frecuencia", "via",
                               "prescriptor", "indicacion"]),
         num_rows="dynamic", hide_index=True, use_container_width=True, key="med",
         column_config={
-            "medicamento": st.column_config.TextColumn("Medicamento (genÃ©rico)"),
-            "dosis": "Dosis", "frecuencia": "Frecuencia", "via": "VÃ­a",
-            "prescriptor": "Prescriptor", "indicacion": "IndicaciÃ³n",
+            "medicamento": st.column_config.TextColumn("Medicamento (genérico)"),
+            "dosis": "Dosis", "frecuencia": "Frecuencia", "via": "Vía",
+            "prescriptor": "Prescriptor", "indicacion": "Indicación",
         },
     )
 
-    st.subheader("Cribado farmacolÃ³gico adicional")
+    st.subheader("Cribado farmacológico adicional")
     c1, c2 = st.columns(2)
     with c1:
-        adm["anticoagulado"] = tri("Â¿Anticoagulado?", "antico")
+        adm["anticoagulado"] = tri("¿Anticoagulado?", "antico")
         adm["anticoag_tipo"] = sel("Tipo de anticoagulante", ["avk", "naco"], "antico_tipo",
                                    help="AVK = warfarina/acenocumarol")
-        adm["anticoag_control_rin"] = tri("Â¿Control de RIN?", "rin")
-        adm["toma_insulina"] = tri("Â¿Toma insulina?", "insu")
+        adm["anticoag_control_rin"] = tri("¿Control de RIN?", "rin")
+        adm["toma_insulina"] = tri("¿Toma insulina?", "insu")
         adm["insulina_esquema"] = sel("Esquema de insulina",
                                       ["basal", "basal_bolo", "bomba"], "insu_esq")
     with c2:
-        adm["corticoides_cronicos"] = tri("Â¿Corticoides crÃ³nicos?", "cort")
-        adm["corticoides_detalle"] = st.text_input("Corticoides: dosis y duraciÃ³n") or None
+        adm["corticoides_cronicos"] = tri("¿Corticoides crónicos?", "cort")
+        adm["corticoides_detalle"] = st.text_input("Corticoides: dosis y duración") or None
         adm["medicacion_memoria_conducta"] = tri(
-            "Â¿MedicaciÃ³n memoria/conducta? (anticolinesterÃ¡sicos, memantina, antipsicÃ³ticos)", "memo")
+            "¿Medicación memoria/conducta? (anticolinesterásicos, memantina, antipsicóticos)", "memo")
         adm["dificultad_autoadministracion"] = st.text_input(
-            "Â¿Dificultades para administrarse la medicaciÃ³n de forma autÃ³noma?") or None
+            "¿Dificultades para administrarse la medicación de forma autónoma?") or None
 
-# ===================== MÃ“DULO 4 â€” PROBLEMAS ACTIVOS =====================
+# ===================== MÓDULO 4 — PROBLEMAS ACTIVOS =====================
 with tabs[4]:
-    st.info("Preguntar por las Ãºltimas 4â€“8 semanas. MÃ³dulo clave para la planificaciÃ³n.")
-    st.subheader("4.1 Motivo principal de rehabilitaciÃ³n")
-    adm["motivo_descripcion"] = st.text_area("DescripciÃ³n clÃ­nica") or None
+    st.info("Preguntar por las últimas 4–8 semanas. Módulo clave para la planificación.")
+    st.subheader("4.1 Motivo principal de rehabilitación")
+    adm["motivo_descripcion"] = st.text_area("Descripción clínica") or None
     c1, c2 = st.columns(2)
     with c1:
         adm["motivo_fecha_inicio"] = st.text_input("Fecha de inicio / evento desencadenante") or None
     with c2:
-        adm["motivo_internacion_previa"] = tri("Â¿InternaciÃ³n previa relacionada?", "mot_int")
+        adm["motivo_internacion_previa"] = tri("¿Internación previa relacionada?", "mot_int")
 
     st.subheader("4.2 Problemas de salud activos secundarios")
     prob_edit = st.data_editor(
@@ -286,49 +370,49 @@ with tabs[4]:
         num_rows="dynamic", hide_index=True, use_container_width=True, key="prob",
         column_config={
             "problema": "Problema",
-            "descripcion": st.column_config.TextColumn("DescripciÃ³n / EvoluciÃ³n", width="large"),
+            "descripcion": st.column_config.TextColumn("Descripción / Evolución", width="large"),
             "estado": st.column_config.SelectboxColumn(
                 "Estado", options=["estable", "seguimiento", "descompensado"]),
-            "medico_responsable": "MÃ©dico responsable",
+            "medico_responsable": "Médico responsable",
         },
     )
 
-    st.subheader("4.3 Hospitalizaciones (Ãºltimos 12 meses)")
+    st.subheader("4.3 Hospitalizaciones (últimos 12 meses)")
     c1, c2, c3 = st.columns(3)
     with c1:
-        adm["hosp_12m_numero"] = st.number_input("NÂ° internaciones", 0, value=None, step=1, key="h1")
+        adm["hosp_12m_numero"] = st.number_input("N° internaciones", 0, value=None, step=1, key="h1")
     with c2:
-        adm["hosp_12m_uci"] = tri("Â¿Alguna en UCI/UTI?", "uci")
-        adm["hosp_12m_uci_duracion"] = st.text_input("DuraciÃ³n aprox. en UCI") or None
+        adm["hosp_12m_uci"] = tri("¿Alguna en UCI/UTI?", "uci")
+        adm["hosp_12m_uci_duracion"] = st.text_input("Duración aprox. en UCI") or None
     with c3:
         adm["hosp_12m_motivos"] = st.text_area("Motivos principales") or None
 
-    st.subheader("4.4 Consultas a guardia (Ãºltimos 3 meses)")
+    st.subheader("4.4 Consultas a guardia (últimos 3 meses)")
     c1, c2 = st.columns(2)
     with c1:
-        adm["guardia_3m_numero"] = st.number_input("NÂ° consultas", 0, value=None, step=1, key="g1")
+        adm["guardia_3m_numero"] = st.number_input("N° consultas", 0, value=None, step=1, key="g1")
     with c2:
         adm["guardia_3m_motivos"] = st.text_area("Motivos", key="g2") or None
 
-# ===================== MÃ“DULO 5 â€” FUNCIONAL =====================
+# ===================== MÓDULO 5 — FUNCIONAL =====================
 with tabs[5]:
     st.subheader("5.1 Movilidad")
     c1, c2 = st.columns(2)
     with c1:
-        adm["deambulacion"] = sel("DeambulaciÃ³n independiente",
+        adm["deambulacion"] = sel("Deambulación independiente",
                                  ["independiente", "no", "con_ayuda_tecnica"], "deamb")
-        adm["ayuda_tecnica"] = st.multiselect("Ayuda tÃ©cnica",
+        adm["ayuda_tecnica"] = st.multiselect("Ayuda técnica",
                                              ["baston", "andador", "silla_ruedas"], key="ayudat") or None
     with c2:
         adm["sube_escaleras"] = sel("Sube escaleras", ["si", "no", "con_ayuda"], "esc")
         adm["distancia_marcha"] = st.text_input("Distancia de marcha habitual", "50 mtrs") or None
 
-    st.subheader("5.2 Ãndice de Barthel referido â€” independencia PREVIA al evento")
+    st.subheader("5.2 Índice de Barthel referido — independencia PREVIA al evento")
     niveles = ["independiente", "asistido", "dependiente"]
     c1, c2, c3 = st.columns(3)
     with c1:
-        adm["avd_alimentacion"] = sel("AlimentaciÃ³n", niveles, "avd1")
-        adm["avd_higiene"] = sel("Higiene / BaÃ±o", niveles, "avd2")
+        adm["avd_alimentacion"] = sel("Alimentación", niveles, "avd1")
+        adm["avd_higiene"] = sel("Higiene / Baño", niveles, "avd2")
     with c2:
         adm["avd_vestido"] = sel("Vestido", niveles, "avd3")
         adm["avd_continencia"] = sel("Continencia", niveles, "avd4")
@@ -336,34 +420,34 @@ with tabs[5]:
         adm["avd_traslados"] = sel("Traslados / Transferencias", niveles, "avd5")
     adm["avd_observaciones"] = st.text_input("Observaciones AVD") or None
 
-    st.subheader("5.3 CogniciÃ³n basal")
+    st.subheader("5.3 Cognición basal")
     c1, c2, c3 = st.columns(3)
     with c1:
-        adm["olvidos_previos"] = sel("Â¿Olvidos frecuentes previos?",
+        adm["olvidos_previos"] = sel("¿Olvidos frecuentes previos?",
                                     ["si", "no", "no_sabe"], "olv")
     with c2:
-        adm["dx_cognitivo_previo"] = tri("DiagnÃ³stico cognitivo previo", "dxc")
-        adm["dx_cognitivo_cual"] = st.text_input("Â¿CuÃ¡l?") or None
+        adm["dx_cognitivo_previo"] = tri("Diagnóstico cognitivo previo", "dxc")
+        adm["dx_cognitivo_cual"] = st.text_input("¿Cuál?") or None
     with c3:
-        adm["mmse_puntaje"] = st.number_input("MMSE (0â€“30)", 0, 30, value=None, step=1)
-        adm["orientacion_basal"] = sel("OrientaciÃ³n tempo-espacial basal",
+        adm["mmse_puntaje"] = st.number_input("MMSE (0–30)", 0, 30, value=None, step=1)
+        adm["orientacion_basal"] = sel("Orientación tempo-espacial basal",
                                       ["conservada", "parcial", "ausente"], "ori")
 
-    st.subheader("5.4 ComunicaciÃ³n y sensopercepciÃ³n")
+    st.subheader("5.4 Comunicación y sensopercepción")
     c1, c2 = st.columns(2)
     with c1:
         adm["idioma_principal"] = st.text_input("Idioma principal") or None
-        adm["dificultad_comunicacion"] = tri("Dificultades previas en la comunicaciÃ³n", "dcom")
+        adm["dificultad_comunicacion"] = tri("Dificultades previas en la comunicación", "dcom")
         adm["dificultad_comunicacion_detalle"] = st.text_input("Especificar dificultad") or None
     with c2:
-        adm["audicion"] = sel("AudiciÃ³n",
+        adm["audicion"] = sel("Audición",
                              ["normal", "hipoacusia_con_audifono", "hipoacusia_sin_compensar"], "aud")
-        adm["vision"] = sel("VisiÃ³n",
+        adm["vision"] = sel("Visión",
                            ["normal", "reducida_compensada", "reducida_sin_compensar"], "vis")
 
-# ===================== MÃ“DULO 6 â€” FACTORES DE RIESGO =====================
+# ===================== MÓDULO 6 — FACTORES DE RIESGO =====================
 with tabs[6]:
-    st.subheader("6 Â· Factores de riesgo (banderas rojas)")
+    st.subheader("6 · Factores de riesgo (banderas rojas)")
     df_fac = pd.DataFrame([
         {"id": r["id"], "factor": r["factor"], "presente": False, "detalle": ""}
         for r in CAT_FAC
@@ -373,19 +457,19 @@ with tabs[6]:
         column_config={
             "id": None,
             "factor": st.column_config.TextColumn("Factor de riesgo", disabled=True, width="large"),
-            "presente": st.column_config.CheckboxColumn("Â¿Presente?"),
-            "detalle": st.column_config.TextColumn("Detalle / observaciÃ³n", width="large"),
+            "presente": st.column_config.CheckboxColumn("¿Presente?"),
+            "detalle": st.column_config.TextColumn("Detalle / observación", width="large"),
         },
     )
 
-# ===================== MÃ“DULO 7 â€” CIERRE =====================
+# ===================== MÓDULO 7 — CIERRE =====================
 with tabs[7]:
-    st.subheader("7 Â· Cierre y observaciones")
+    st.subheader("7 · Cierre y observaciones")
     adm["observaciones"] = st.text_area(
-        "ImpresiÃ³n general, alertas subjetivas y aspectos no recogidos en los mÃ³dulos anteriores",
+        "Impresión general, alertas subjetivas y aspectos no recogidos en los módulos anteriores",
         height=150) or None
 
-# ===================== RECOLECCIÃ“N + ACCIONES =====================
+# ===================== RECOLECCIÓN + ACCIONES =====================
 def _cell(r, k):
     """Lee una celda de data_editor devolviendo \"\" para None/NaN."""
     v = r.get(k)
@@ -437,7 +521,7 @@ st.divider()
 col_guardar, col_pdf = st.columns(2)
 
 with col_guardar:
-    if st.button("ðŸ’¾ Guardar evaluaciÃ³n", type="primary", use_container_width=True):
+    if st.button("💾 Guardar evaluación", type="primary", use_container_width=True):
         errores = []
         if not pac.get("dni", "").strip():
             errores.append("Falta el DNI.")
@@ -456,7 +540,7 @@ with col_guardar:
                     medicacion=medicacion, problemas=problemas, factores=factores,
                     creado_por=usuario["id"],
                 )
-                st.success(f"âœ… EvaluaciÃ³n guardada (admisiÃ³n #{admision_id}). "
+                st.success(f"✅ Evaluación guardada (admisión #{admision_id}). "
                            f"Total en base: {db.contar_admisiones()}.")
                 st.balloons()
             except Exception as e:
@@ -472,12 +556,11 @@ with col_pdf:
                 medicacion, problemas, factores)
             dni = (pac.get("dni") or "sin_dni").strip()
             st.download_button(
-                "ðŸ“„ Descargar PDF", data=pdf_bytes,
+                "📄 Descargar PDF", data=pdf_bytes,
                 file_name=f"admision_{dni}.pdf", mime="application/pdf",
                 use_container_width=True)
         except Exception as e:
             st.warning(f"No se pudo generar el PDF: {e}")
     else:
-        st.button("ðŸ“„ Descargar PDF", disabled=True, use_container_width=True,
-                  help="CompletÃ¡ al menos DNI o nombre para generar el PDF.")
-
+        st.button("📄 Descargar PDF", disabled=True, use_container_width=True,
+                  help="Completá al menos DNI o nombre para generar el PDF.")
