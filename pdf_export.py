@@ -235,6 +235,21 @@ def generar_pdf(paciente: dict, admision: dict,
     _kv_rows(pdf, admision, MOD5)
 
     _section(pdf, "Módulo 6 · Factores de riesgo (banderas rojas)")
+    n_fac = sum(1 for f in factores if f.get("presente"))
+    if n_fac <= 2:
+        sem_rgb, sem_txt = (46, 125, 50), "Riesgo bajo"
+    elif n_fac <= 5:
+        sem_rgb, sem_txt = (249, 168, 37), "Riesgo moderado"
+    else:
+        sem_rgb, sem_txt = (198, 40, 40), "Riesgo alto"
+    pdf.ln(1)
+    pdf.set_fill_color(*sem_rgb)
+    pdf.cell(7, 7, "", fill=True, border=0)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_text_color(*TEXT)
+    pdf.cell(0, 7, _s(f"  Semáforo: {sem_txt}  -  {n_fac}/10 factores presentes"),
+             new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(1)
     _tabla(pdf, "Factores presentes", ["Factor", "Detalle"],
            [(f.get("factor"), f.get("detalle")) for f in factores if f.get("presente")],
            [80, 110])

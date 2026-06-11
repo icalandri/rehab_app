@@ -482,6 +482,30 @@ with tabs[6]:
         },
     )
 
+    # --- Semáforo de riesgo según cantidad de factores presentes ---
+    n_fac = int(pd.to_numeric(fac_edit["presente"], errors="coerce")
+                .fillna(0).astype(bool).sum())
+    if n_fac <= 2:
+        _color, _nivel = "#2e7d32", "Riesgo bajo"
+    elif n_fac <= 5:
+        _color, _nivel = "#f9a825", "Riesgo moderado"
+    else:
+        _color, _nivel = "#c62828", "Riesgo alto"
+    st.markdown(
+        f"""
+        <div style="display:flex;align-items:center;gap:14px;margin-top:12px;
+                    padding:14px 18px;border-radius:12px;background:#edf4f8;
+                    border:1px solid #d0e3ec;">
+          <span style="width:28px;height:28px;border-radius:50%;background:{_color};
+                       display:inline-block;box-shadow:0 0 0 4px {_color}33;"></span>
+          <span style="font-size:1.1rem;color:#20323a;">
+            <b>{_nivel}</b> &nbsp;·&nbsp; {n_fac}/10 factores de riesgo presentes
+          </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 # ===================== MÓDULO 7 — CIERRE =====================
 with tabs[7]:
     st.subheader("7 · Cierre y observaciones")
